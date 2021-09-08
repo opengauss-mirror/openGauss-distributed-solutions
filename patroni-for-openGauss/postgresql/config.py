@@ -284,9 +284,9 @@ class ConfigHandler(object):
         'max_prepared_transactions': (0, lambda v: int(v) >= 0, 90100),
         'max_locks_per_transaction': (64, lambda v: int(v) >= 32, 90100),
         'track_commit_timestamp': ('off', lambda v: parse_bool(v) is not None, 90500),
-        'max_replication_slots': (10, lambda v: int(v) >= 4, 90400),
+        'max_replication_slots': (10, lambda v: int(v) >= 4, 90100),
         'max_worker_processes': (8, lambda v: int(v) >= 2, 90400),
-        'wal_log_hints': ('on', lambda _: False, 90400)
+        'wal_log_hints': ('on', lambda _: False, 90100)
     })
 
     _RECOVERY_PARAMETERS = set(recovery_parameters.keys())
@@ -386,6 +386,8 @@ class ConfigHandler(object):
         # rename the original configuration if it is necessary
         if 'custom_conf' not in self._config and not os.path.exists(self._postgresql_base_conf):
             os.rename(self._postgresql_conf, self._postgresql_base_conf)
+        else:
+            return
 
         # In case we are using custom bootstrap from spilo image with PITR it fails if it contains increasing
         # values like Max_connections. We disable hot_standby so it will accept increasing values.
@@ -727,6 +729,26 @@ class ConfigHandler(object):
                     and str(value[0]) != str(wanted_recovery_params.get(param, '')):
                 record_missmatch(value[1])
         return required['restart'] + required['reload'] > 0, required['restart'] > 0
+
+    def check_db_state(self, is_leader=False):
+        """
+        check the state of database, 
+        returns the next action
+            'normal':  the database is running and its state is Normal
+            'rebuild': the database is running but it is not Noamrl, so it needs to be rebuilded
+            'restart': the database is not running, so it needs to be restarted
+        """
+        status, output = self._postgresql.gs_query()
+        if status != 0:
+            return 'restart'
+        local_role = re.findall('local_role +: (.+)', output)[0]
+        db_state = re.findall('db_state +: (.+)', output)[0]
+        detail_information = re.findall('detail_information +: (.+)', output)[0]
+        if is_leader and local_role != 'Primary':
+            return 'restart'
+        if local_role == 'Standby' and 'WAL segment removed' in detail_information:
+            return 'rebuild'
+        return 'normal'
 
     @staticmethod
     def _remove_file_if_exists(name):

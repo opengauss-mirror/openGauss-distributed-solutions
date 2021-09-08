@@ -478,11 +478,14 @@ class RestApiHandler(BaseHTTPRequestHandler):
             stmt = ("SELECT " + postgresql.POSTMASTER_START_TIME + ", " + postgresql.TL_LSN + ","
                     " pg_catalog.to_char(pg_catalog.pg_last_xact_replay_timestamp(), 'YYYY-MM-DD HH24:MI:SS.MS TZ'),"
                     " pg_catalog.array_to_json(pg_catalog.array_agg(pg_catalog.row_to_json(ri))) "
-                    "FROM (SELECT (SELECT rolname FROM pg_authid WHERE oid = usesysid) AS usename,"
+                    "FROM (SELECT (SELECT rolname FROM pg_authid WHERE oid = %s) AS usename,"
                     " application_name, client_addr, w.state, sync_state, sync_priority"
-                    " FROM pg_catalog.pg_stat_get_wal_senders() w, pg_catalog.pg_stat_get_activity(pid)) AS ri")
+                    " FROM pg_catalog.pg_stat_get_wal_senders() w, pg_catalog.pg_stat_get_activity(%s)) AS ri")
+            init_user_oid = 10
+            gaussdb_pid = os.popen('ps x | grep gaussdb | grep -v grep').readlines()[0].split()[0]
 
-            row = self.query(stmt.format(postgresql.wal_name, postgresql.lsn_name), retry=retry)[0]
+            row = self.query(stmt.format(postgresql.wal_name, postgresql.lsn_name),
+                            init_user_oid, gaussdb_pid, retry=retry)[0]
 
             result = {
                 'state': postgresql.state,

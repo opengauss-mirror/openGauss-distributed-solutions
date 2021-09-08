@@ -141,7 +141,7 @@ class PostmasterProcess(psutil.Process):
         psutil.wait_procs(children + [self])
         return True
 
-    def signal_stop(self, mode, pg_ctl='pg_ctl'):
+    def signal_stop(self, mode, pg_ctl='gs_ctl'):
         """Signal postmaster process to stop
 
         :returns None if signaled, True if process is already gone, False if error

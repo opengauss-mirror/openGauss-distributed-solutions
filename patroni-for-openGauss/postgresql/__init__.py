@@ -5,6 +5,7 @@ import shlex
 import shutil
 import subprocess
 import time
+import threading
 
 from contextlib import contextmanager
 from copy import deepcopy
@@ -54,7 +55,7 @@ class Postgresql(object):
               "pg_catalog.pg_current_{0}_{1}()), 1, 8))::bit(32)::int END, "  # master timeline
               "CASE WHEN pg_catalog.pg_is_in_recovery() THEN 0 "
               "ELSE pg_catalog.pg_{0}_{1}_diff(pg_catalog.pg_current_{0}_{1}(), '0/0')::bigint END, "  # write_lsn
-              "pg_catalog.pg_{0}_{1}_diff(pg_catalog.pg_last_{0}_replay_{1}(), '0/0')::bigint,  "
+              "pg_catalog.pg_{0}_{1}_diff(split_part(left(pg_catalog.pg_last_{0}_replay_{1}()::text,-1),',',2), '0/0')::bigint,  "
               "pg_catalog.pg_{0}_{1}_diff(COALESCE(pg_catalog.pg_last_{0}_receive_{1}(), '0/0'), '0/0')::bigint, "
               "pg_catalog.pg_is_in_recovery() AND pg_catalog.pg_is_{0}_replay_paused()")
 
@@ -184,8 +185,15 @@ class Postgresql(object):
 
         :returns: `!True` when return_code == 0, otherwise `!False`"""
 
-        pg_ctl = [self.pgcommand('pg_ctl'), cmd]
+        pg_ctl = [self.pgcommand('gs_ctl'), cmd]
         return subprocess.call(pg_ctl + ['-D', self._data_dir] + list(args), **kwargs) == 0
+
+    def gs_query(self):
+        """
+        query the state of the database
+        """
+        status, output = subprocess.getstatusoutput(self.pgcommand('gs_ctl') + ' query -D ' + self._data_dir)
+        return status, output
 
     def pg_isready(self):
         """Runs pg_isready to see if PostgreSQL is accepting connections.
@@ -193,7 +201,7 @@ class Postgresql(object):
         :returns: 'ok' if PostgreSQL is up, 'reject' if starting up, 'no_resopnse' if not up."""
 
         r = self.config.local_connect_kwargs
-        cmd = [self.pgcommand('pg_isready'), '-p', r['port'], '-d', self._database]
+        cmd = [self.pgcommand('gs_isready'), '-p', r['port'], '-d', self._database]
 
         # Host is not set if we are connecting via default unix socket
         if 'host' in r:
@@ -432,7 +440,7 @@ class Postgresql(object):
         logger.warning("Timed out waiting for PostgreSQL to start")
         return False
 
-    def start(self, timeout=None, task=None, block_callbacks=False, role=None):
+    def start(self, timeout=None, task=None, block_callbacks=False, role=None, is_standby=False):
         """Start PostgreSQL
 
         Waits for postmaster to open ports or terminate so pg_isready can be used to check startup completion
@@ -471,18 +479,19 @@ class Postgresql(object):
         self.config.replace_pg_hba()
         self.config.replace_pg_ident()
 
-        options = ['--{0}={1}'.format(p, configuration[p]) for p in self.config.CMDLINE_OPTIONS
-                   if p in configuration and p not in ('wal_keep_segments', 'wal_keep_size')]
+        options = []
+        if is_standby:
+            options += ['-M', 'standby']
 
         if self.cancellable.is_cancelled:
             return False
 
         with task or null_context():
             if task and task.is_cancelled:
-                logger.info("PostgreSQL start cancelled.")
+                logger.info("openGauss start cancelled.")
                 return False
 
-            self._postmaster_proc = PostmasterProcess.start(self.pgcommand('postgres'),
+            self._postmaster_proc = PostmasterProcess.start(self.pgcommand('gaussdb'),
                                                             self._data_dir,
                                                             self.config.postgresql_conf,
                                                             options)
@@ -528,6 +537,16 @@ class Postgresql(object):
             logger.exception('Exception during CHECKPOINT')
             return 'not accessible or not healty'
 
+    def rebuild(self):
+        """
+        standby is abnormal, rebuild
+        """
+        if not self.is_running():
+            self.pg_ctl('start', '-M', 'standby')
+        rebuild_thread = threading.Thread(target=self.pg_ctl, args=('build', '-M', 'standby'))
+        rebuild_thread.start()
+        rebuild_thread.join()
+
     def stop(self, mode='fast', block_callbacks=False, checkpoint=None, on_safepoint=None, stop_timeout=None):
         """Stop PostgreSQL
 
@@ -567,7 +586,7 @@ class Postgresql(object):
             self.set_state('stopping')
 
         # Send signal to postmaster to stop
-        success = postmaster.signal_stop(mode, self.pgcommand('pg_ctl'))
+        success = postmaster.signal_stop(mode, self.pgcommand('gs_ctl'))
         if success is not None:
             if success and on_safepoint:
                 on_safepoint()
@@ -592,7 +611,7 @@ class Postgresql(object):
     def terminate_postmaster(self, postmaster, mode, stop_timeout):
         if mode in ['fast', 'smart']:
             try:
-                success = postmaster.signal_stop('immediate', self.pgcommand('pg_ctl'))
+                success = postmaster.signal_stop('immediate', self.pgcommand('gs_ctl'))
                 if success:
                     return True
                 postmaster.wait(timeout=stop_timeout)
@@ -605,7 +624,7 @@ class Postgresql(object):
     def terminate_starting_postmaster(self, postmaster):
         """Terminates a postmaster that has not yet opened ports or possibly even written a pid file. Blocks
         until the process goes away."""
-        postmaster.signal_stop('immediate', self.pgcommand('pg_ctl'))
+        postmaster.signal_stop('immediate', self.pgcommand('gs_ctl'))
         postmaster.wait()
 
     def _wait_for_connection_close(self, postmaster):
@@ -677,7 +696,7 @@ class Postgresql(object):
 
         return self.state == 'running'
 
-    def restart(self, timeout=None, task=None, block_callbacks=False, role=None):
+    def restart(self, timeout=None, task=None, block_callbacks=False, role=None, is_standby=False):
         """Restarts PostgreSQL.
 
         When timeout parameter is set the call will block either until PostgreSQL has started, failed to start or
@@ -688,19 +707,23 @@ class Postgresql(object):
         self.set_state('restarting')
         if not block_callbacks:
             self.__cb_pending = ACTION_ON_RESTART
-        ret = self.stop(block_callbacks=True) and self.start(timeout, task, True, role)
+        ret = 0
+        if is_standby:
+            ret = self.stop(block_callbacks=True) and self.start(timeout, task, True, role, is_standby)
+        else:
+            ret = self.stop(block_callbacks=True) and self.start(timeout, task, True, role)
         if not ret and not self.is_starting():
             self.set_state('restart failed ({0})'.format(self.state))
         return ret
 
     def is_healthy(self):
         if not self.is_running():
-            logger.warning('Postgresql is not running.')
+            logger.warning('openGauss is not running.')
             return False
         return True
 
     def get_guc_value(self, name):
-        cmd = [self.pgcommand('postgres'), '-D', self._data_dir, '-C', name]
+        cmd = [self.pgcommand('gaussdb'), '-D', self._data_dir, '-C', name]
         try:
             data = subprocess.check_output(cmd)
             if data:
@@ -763,10 +786,7 @@ class Postgresql(object):
             except Exception:
                 logger.exception('Failed to read and parse %s', (history_path,))
 
-    def follow(self, member, role='replica', timeout=None, do_reload=False):
-        recovery_params = self.config.build_recovery_params(member)
-        self.config.write_recovery_conf(recovery_params)
-
+    def follow(self, member, role='replica', timeout=None, do_reload=False, is_standby=False, rebuild=False):
         # When we demoting the master or standby_leader to replica or promoting replica to a standby_leader
         # and we know for sure that postgres was already running before, we will only execute on_role_change
         # callback and prevent execution of on_restart/on_start callback.
@@ -777,14 +797,22 @@ class Postgresql(object):
             self.__cb_pending = ACTION_NOOP
 
         if self.is_running():
-            if do_reload:
+            if is_standby and rebuild:
+                self.rebuild()
+            elif do_reload:
                 self.config.write_postgresql_conf()
                 if self.reload(block_callbacks=change_role) and change_role:
                     self.set_role(role)
             else:
-                self.restart(block_callbacks=change_role, role=role)
+                if is_standby:
+                    self.restart(block_callbacks=change_role, role=role, is_standby=True)
+                else:
+                    self.restart(block_callbacks=change_role, role=role)
         else:
-            self.start(timeout=timeout, block_callbacks=change_role, role=role)
+            if is_standby:
+                self.start(timeout=timeout, block_callbacks=change_role, role=role, is_standby=True)
+            else:
+                self.start(timeout=timeout, block_callbacks=change_role, role=role)
 
         if change_role:
             # TODO: postpone this until start completes, or maybe do even earlier
@@ -829,7 +857,7 @@ class Postgresql(object):
             logger.info("PostgreSQL promote cancelled.")
             return False
 
-        ret = self.pg_ctl('promote', '-W')
+        ret = self.pg_ctl('failover')
         if ret:
             self.set_role('master')
             if on_success is not None:

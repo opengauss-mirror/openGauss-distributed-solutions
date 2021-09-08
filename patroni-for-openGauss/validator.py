@@ -88,9 +88,9 @@ def is_ipv6_address(ip):
 
 def get_major_version(bin_dir=None):
     if not bin_dir:
-        binary = 'postgres'
+        binary = 'gaussdb'
     else:
-        binary = os.path.join(bin_dir, 'postgres')
+        binary = os.path.join(bin_dir, 'gaussdb')
     version = subprocess.check_output([binary, '--version']).decode()
     version = re.match(r'^[^\s]+ [^\s]+ (\d+)(\.(\d+))?', version)
     return '.'.join([version.group(1), version.group(3)]) if int(version.group(1)) < 10 else version.group(1)
@@ -369,8 +369,8 @@ schema = Schema({
       "rewind":  userattributes
     },
     "data_dir": validate_data_dir,
-    Optional("bin_dir"): Directory(contains_executable=["pg_ctl", "initdb", "pg_controldata", "pg_basebackup",
-                                                        "postgres", "pg_isready"]),
+    Optional("bin_dir"): Directory(contains_executable=["gs_ctl", "gs_initdb", "pg_controldata", "gs_basebackup",
+                                                        "gaussdb", "gs_isready"]),
     Optional("parameters"): {
       Optional("unix_socket_directories"): lambda s: assert_(all([isinstance(s, string_types), len(s)]))
     },

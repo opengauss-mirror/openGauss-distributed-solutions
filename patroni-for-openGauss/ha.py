@@ -361,9 +361,13 @@ class Ha(object):
         elif self.has_lock():
             msg = "starting as readonly because i had the session lock"
             node_to_follow = None
-
+        lock_owner = self.cluster.leader and self.cluster.leader.name
+        is_standby = False
+        if lock_owner != None and lock_owner != self.state_handler.name:
+            logger.info("starting as standby")
+            is_standby = True
         if self._async_executor.try_run_async('restarting after failure', self.state_handler.follow,
-                                              args=(node_to_follow, role, timeout)) is None:
+                                              args=(node_to_follow, role, timeout, False, is_standby)) is None:
             self.recovering = True
         return msg
 
@@ -428,14 +432,23 @@ class Ha(object):
         if self.is_standby_cluster() and role == 'replica' and not (node_to_follow and node_to_follow.conn_url):
             return 'continue following the old known standby leader'
         else:
-            change_required, restart_required = self.state_handler.config.check_recovery_conf(node_to_follow)
-            if change_required:
-                if restart_required:
-                    self._async_executor.try_run_async('changing primary_conninfo and restarting',
-                                                       self.state_handler.follow, args=(node_to_follow, role))
+            action = self.state_handler.config.check_db_state()
+            if action == 'restart':
+                if role == 'replica':
+                    logger.info('the replica is abnormal and restarting')
+                    self._async_executor.try_run_async('the replica is abnormal and restarting',
+                            self.state_handler.follow, args=(node_to_follow, role, None, False, True))
                 else:
-                    self.state_handler.follow(node_to_follow, role, do_reload=True)
+                    logger.info('the database is abnormal and restarting')
+                    self._async_executor.try_run_async('the database is abnormal and restarting',
+                            self.state_handler.follow, args=(node_to_follow, role))
                 self._rewind.trigger_check_diverged_lsn()
+            elif action == 'rebuild':
+                logger.info('the standby is abnormal and rebuilding')
+                self.state_handler.rebuild()
+                time.sleep(5)
+                status, output = self.state_handler.gs_query()
+                logger.info(output)
             elif role == 'standby_leader' and self.state_handler.role != role:
                 self.state_handler.set_role(role)
                 self.state_handler.call_nowait(ACTION_ON_ROLE_CHANGE)
@@ -570,6 +583,24 @@ class Ha(object):
         demote_reason = 'cannot be a real master in standby cluster'
         return self.follow(demote_reason, message)
 
+    def check_and_repair_leader(self):
+        """
+        check the state of leader, if it is not normal, restart to repair it
+        """
+        action = ''
+        retry_times = 3
+        while action != 'normal' and retry_times > 0:
+            action = self.state_handler.config.check_db_state(is_leader=True)
+            retry_times -= 1
+            time.sleep(1)
+        if action == 'restart':
+            logger.info('leader is abnormal and repairing')
+            self.state_handler.pg_ctl('stop')
+            self.state_handler.pg_ctl('start')
+            time.sleep(1)
+            status, output = self.state_handler.gs_query()
+            logger.info(output)
+
     def enforce_master_role(self, message, promote_message):
         """
         Ensure the node that has won the race for the leader key meets criteria
@@ -596,11 +627,15 @@ class Ha(object):
         if self.state_handler.is_leader():
             # Inform the state handler about its master role.
             # It may be unaware of it if postgres is promoted manually.
+            logger.info('enforce_master_role is_leader')
+            self.check_and_repair_leader()
             self.state_handler.set_role('master')
             self.process_sync_replication()
             self.update_cluster_history()
             return message
         elif self.state_handler.role == 'master':
+            logger.info('enforce_master_role master')
+            self.check_and_repair_leader()
             self.process_sync_replication()
             return message
         else:
@@ -852,13 +887,14 @@ class Ha(object):
         # there could be an async action already running, calling follow from here will lead
         # to racy state handler state updates.
         if mode_control['async_req']:
-            self._async_executor.try_run_async('starting after demotion', self.state_handler.follow, (node_to_follow,))
+            self._async_executor.try_run_async('starting after demotion',
+                            self.state_handler.follow, args=(node_to_follow, 'replica', None, False, True))
         else:
             if self.is_synchronous_mode():
                 self.state_handler.config.set_synchronous_standby([])
             if self._rewind.rewind_or_reinitialize_needed_and_possible(leader):
                 return False  # do not start postgres, but run pg_rewind on the next iteration
-            self.state_handler.follow(node_to_follow)
+            self.state_handler.follow(node_to_follow, is_standby=True)
 
     def should_run_scheduled_action(self, action_name, scheduled_at, cleanup_fn):
         if scheduled_at and not self.is_paused():
