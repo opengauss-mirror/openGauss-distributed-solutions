@@ -26,15 +26,9 @@ schemaName: sharding_db
 
 dataSources:
   ds_0:
-    url: jdbc:opengauss://192.168.0.34:40100/ds_0?serverTimezone=UTC&useSSL=false
+    url: jdbc:opengauss://127.0.0.1:5432/ds_0?serverTimezone=UTC&useSSL=false
     username: test
     password: Huawei@123
-    connectionTimeoutMilliseconds: 30000
-    idleTimeoutMilliseconds: 60000
-    maxLifetimeMilliseconds: 1800000
-    maxPoolSize: 4096
-    minPoolSize: 1
-    maintenanceIntervalMilliseconds: 30000
 
 rules:
   tables:
