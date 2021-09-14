@@ -1,0 +1,1 @@
+docker build -t "shardingsphere:1.0.4" -f dockerfile .
