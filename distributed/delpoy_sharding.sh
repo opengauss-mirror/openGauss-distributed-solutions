@@ -58,6 +58,14 @@ spec:
     protocol: TCP
     targetPort: 3307
     nodePort: 30400
+  - port: 8888
+    protocol: TCP
+    targetPort: 8888
+    nodePort: 30600
+  - port: 2181
+    protocol: TCP
+    targetPort: 2181
+    nodePort: 30700
   selector:
     app: ${name}-sha
 " > shardingsphere-svc.yaml
