@@ -41,10 +41,9 @@ class DataSource:
             "password": ds_component[4],
             "connectionTimeoutMilliseconds": 30000,
             "idleTimeoutMilliseconds": 60000,
-            "maintenanceIntervalMilliseconds": 30000,
             "maxLifetimeMilliseconds": 1800000,
             "maxPoolSize": 4096,
-            "minPoolSize": 1
+            "minPoolSize": 10
         }
         return values
 
