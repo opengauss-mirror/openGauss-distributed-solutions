@@ -55,7 +55,7 @@ spec:
   type: NodePort
   ports:
   - port: 3307
-    name: sharding_proxy
+    name: shardingproxy
     protocol: TCP
     targetPort: 3307
     nodePort: 30400
