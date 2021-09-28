@@ -1,0 +1,56 @@
+FROM centos:7.6.1810
+
+# prepare openGauss
+ENV LC_ALL=en_US.utf-8
+ENV LANG en_US.utf8
+
+COPY gosu-amd64 /usr/local/bin/gosu
+COPY wal2json.so /tmp
+COPY etcd.conf.sample /home/omm/etcd.conf
+COPY patroni.yaml.sample /home/omm/patroni.yaml
+COPY psycopg2_binary-2.8.6-cp36-cp36m-manylinux1_x86_64.whl /var/lib
+ENV GOSU_VERSION 1.12
+ADD patroni-2.0.2.tar.gz /var/lib
+ADD etcd.tar.gz /usr/local/bin
+ADD openGauss-2.0.1-CentOS-64bit.tar.bz2 /usr/local/opengauss
+
+
+RUN set -eux; \
+    yum install -y \
+    python36 libaio libaio-devel libkeyutils-dev locales libreadline-dev python3-setuptools \
+    python36-pip libpq-devel python-devel python3-devel gcc bind-utils &> /dev/null && \
+    yum clean all && \
+    groupadd -g 70 omm && \
+    useradd -u 70 -g omm -d /home/omm -s /bin/bash omm;  \
+    mkdir -p /var/lib/opengauss && \
+    mkdir -p /usr/local/opengauss && \
+    mkdir -p /var/run/opengauss  && \
+    mkdir -p /home/omm && \
+    mkdir -p /var/log/ && \
+    mkdir /docker-entrypoint-initdb.d && \
+    chown omm:omm /var/lib/opengauss /home/omm /var/run/opengauss /docker-entrypoint-initdb.d \
+    /var/log /var/lib/patroni-2.0.2 -R && \
+    cp /tmp/wal2json.so /usr/local/opengauss && \
+    echo "export GAUSSHOME=/usr/local/opengauss"  >> /home/omm/.bashrc && \
+    echo "export PATH=\$GAUSSHOME/bin:\$PATH " >> /home/omm/.bashrc && \
+    echo "export LD_LIBRARY_PATH=\$GAUSSHOME/lib:\$LD_LIBRARY_PATH" >> /home/omm/.bashrc && \
+    chown omm:omm /home/omm -R && \
+    chmod +x /usr/local/bin/gosu && \
+    cd /var/lib/ && pip3 install psycopg2_binary-2.8.6-cp36-cp36m-manylinux1_x86_64.whl && \
+    rm psycopg2_binary-2.8.6-cp36-cp36m-manylinux1_x86_64.whl -f && \
+    pip3 install six python-etcd importlib-metadata && \
+    cd /var/lib/patroni-2.0.2/ && python3 setup.py build && python3 setup.py install && \
+    rm /var/lib/patroni-2.0.2/ -rf && \
+    mv /etc/localtime /etc/localtime_bak && \
+    cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+
+# prepare atcd and patroni
+
+ENV PGDATA /var/lib/opengauss/data
+
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod 755 /usr/local/bin/entrypoint.sh;ln -s /usr/local/bin/entrypoint.sh / # backwards compat
+ENTRYPOINT ["entrypoint.sh"]
+EXPOSE 5432
+USER omm
+CMD ["patroni"]

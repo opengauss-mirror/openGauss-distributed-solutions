@@ -1,0 +1,1 @@
+docker build -t "opengauss:1.0.6" -f dockerfile .

@@ -1,0 +1,21 @@
+FROM java:8
+
+ADD apache-zookeeper-3.7.0-bin.tar.gz /usr/
+ADD shardingsphere-scaling.tar.gz /usr/
+ADD shardingsphere-proxy.tar.gz /usr/
+COPY entrypoint.sh /
+
+ARG APP_NAME
+ENV PROXY_PATH /usr/shardingsphere-proxy
+ENV SCALING_PATH /usr/shardingsphere-scaling
+ENV ZOOKEEPER_PATH /usr/apache-zookeeper-3.7.0-bin
+
+RUN set -eux; \
+    mkdir -p ${PROXY_PATH}/ext-lib && \
+    mkdir -p ${SCALING_PATH}/ext-lib && \
+    mv ${ZOOKEEPER_PATH}/conf/zoo_sample.cfg ${ZOOKEEPER_PATH}/conf/zoo.cfg && \
+    chmod 755 /entrypoint.sh && \
+    echo "export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> /etc/profile
+
+EXPOSE 8888
+ENTRYPOINT ["/entrypoint.sh"]
