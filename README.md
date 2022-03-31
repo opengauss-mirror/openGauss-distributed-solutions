@@ -14,7 +14,7 @@ K8S一键化部署脚本参照distributed下的 Kubernates环境部署说明.doc
 
 #### 使用说明
 
-1.  distributed：一键化部署脚本
+1.  distributed：openGauss分布式搭建脚本
 2.  docker-build：打包镜像
 3.  patroni-for-openGauss：适配了openGauss的patroni，负责对openGauss数据库集群进行自动故障管理
-4.  simple_install：调用的安装脚本
+4.  simple_install：K8S环境初始化脚本

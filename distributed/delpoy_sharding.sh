@@ -30,11 +30,11 @@ spec:
   nodeName: ${hostname}
   containers:
   - name: ${name}-sha
-    image: shardingsphere:1.0.1
+    image: teslacn/shardingsphere-proxy:og-3714873740
     imagePullPolicy: Never
     volumeMounts:
     - name: config-file
-      mountPath: /tmp/
+      mountPath: /opt/shardingsphere-proxy/conf
     ports:
     - containerPort: 3307
       name: ${name}

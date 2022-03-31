@@ -33,7 +33,7 @@ spec:
   restartPolicy: Never
   containers:
   - name: ${hostname}
-    image: opengauss:1.0.5
+    image: opengauss:3.0.0
     imagePullPolicy: Never
     securityContext:
       runAsUser: 0
