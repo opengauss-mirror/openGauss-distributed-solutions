@@ -494,7 +494,12 @@ change_patroni_config() {
         if [ -n "$GS_USERNAME" ] && [ "$GS_USERNAME" != "admin" ]; then
                 sed -i "s/^      username: admin/      username: $GS_USERNAME/" /home/omm/patroni.yaml
         fi
-        sed -i "s/^      password: huawei_123/      password: $GS_PASSWORD/" /home/omm/patroni.yaml
+        escaped_gs_password=$(printf '%s' "$GS_PASSWORD" | sed -e 's/[\/&]/\\&/g')
+        sed -i "s/^      password: <GS_PASSWORD>/      password: ${escaped_gs_password}/" /home/omm/patroni.yaml
+        if grep -q '<GS_PASSWORD>' /home/omm/patroni.yaml; then
+                echo >&2 "error: failed to set Patroni passwords from GS_PASSWORD"
+                exit 1
+        fi
 }
 
 # add new members

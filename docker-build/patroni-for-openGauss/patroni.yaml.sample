@@ -48,13 +48,13 @@ postgresql:
   authentication:
     replication:
       username: admin
-      password: huawei_123
+      password: <GS_PASSWORD>
     superuser:
       username: admin
-      password: huawei_123
+      password: <GS_PASSWORD>
     rewind:
       username: admin
-      password: huawei_123
+      password: <GS_PASSWORD>
 
 
 
