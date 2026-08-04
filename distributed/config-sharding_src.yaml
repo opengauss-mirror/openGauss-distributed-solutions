@@ -28,7 +28,7 @@ dataSources:
   ds_0:
     url: jdbc:opengauss://127.0.0.1:5432/ds_0?serverTimezone=UTC&useSSL=false
     username: test
-    password: Huawei@123
+    password: <OPENGAUSS_PASSWORD>
 
 rules:
   tables:

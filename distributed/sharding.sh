@@ -33,6 +33,7 @@ fi
 
 
 sudo rm -rf user_input.yaml
+umask 077
 
 echo "
 #dataSources:
@@ -44,6 +45,7 @@ echo "
 #       - table2 shard_database_field shard_database_num shard_table_field shard_table_num
 #       - table3 shard_database_field shard_database_num shard_table_field shard_table_num
 dataSources:" > user_input.yaml	
+chmod 600 user_input.yaml
 
 for ((i=1; i<=$sharding_num; i++))
 do
@@ -58,5 +60,3 @@ do
 done
 wait
 echo "tables:" >> user_input.yaml
-
-
